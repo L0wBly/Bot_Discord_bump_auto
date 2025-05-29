@@ -7,7 +7,9 @@ L'objectif de ce bot Discord en Python est de rappeler aux membres du serveur Di
 
 ## 🧐 Features    
 - Ping de rôle
-- Suppression automatique d'ancien message
+- Suppression automatique d'ancien message à minuit
+- Leaderboard de /bump 
+- Visualisation du nom de /bump par membre
 
 
 ## 🛠️ Install Dependencies    
