@@ -8,10 +8,11 @@ import pytz
 # === Config et constantes ===
 load_dotenv()
 TOKEN        = os.getenv('DISCORD_TOKEN')
-CHANNEL_ID   = 1374712467933888513  # ID du salon de bump
-ROLE_ID      = 1377230605309313085  # ID du rôle à ping pour le bump
+CHANNEL_ID   = 1374712467933888513  # Salon de bump
+ROLE_ID      = 1377230605309313085  # Rôle bump
 DISBOARD_ID  = 302050872383242240   # Disboard bot ID
-BIRTHDAY_CHANNEL_ID = 1377990979100999700  # Remplace par l'ID de ton salon anniversaire
+BIRTHDAY_CHANNEL_ID = 1377990979100999700  # Salon anniversaire
+GESTION_ROLE_CHANNEL_ID = 1378015393653985281  # Salon gestion de rôle
 MESSAGE      = "C'est l'heure de bumper !!"
 BIRTHDAY_FILE = "birthdays.json"
 ANNIV_ROLE_NAME = "Anniversaire"
@@ -24,6 +25,22 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 bot.remove_command("help")
 
 paris_tz = pytz.timezone("Europe/Paris")
+
+# ========== Config Rôles via réactions ==========
+REACTION_ROLES = {
+    "📺": 1374482077394931893,      # Regarde l'anime
+    "📖": 1374713188876025888,      # Lecteur des scans
+    "📚": 1374747604763676763,      # Lecteur du manga
+    "🟠": 1374747839795564554,      # Hina Tachibana
+    "🔵": 1374753663255580742,      # Rui Tachibana
+    "🟣": 1374753918340431892,      # Momo Kashiwabara
+    "🟢": 1374753922140475435,      # Miu Ashihara
+    "⚫": 1374754187027550318,      # Natsuo Fujii
+    "🟤": 1374754130626609152,      # Fumiya Kurimoto
+    "📝": 1374752611667935402,      # Poète
+    "✍️": 1374752308013039726,      # Écrivain
+}
+REACTION_ROLE_MESSAGE_ID = None
 
 # ==== Affichage date "31-05" -> "31 mai" ====
 def format_date_jour_mois(date_str):
@@ -51,7 +68,6 @@ def save_birthdays():
         json.dump(birthdays, f, ensure_ascii=False, indent=2)
 
 # === Commandes ANNIVERSAIRE stylées ===
-
 @bot.command(name="anniv")
 async def set_birthday(ctx, date: str = None):
     if not date:
@@ -165,7 +181,6 @@ async def list_birthdays(ctx):
     await ctx.send(embed=embed)
 
 # === Commande !help personnalisée ===
-
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
@@ -177,12 +192,90 @@ async def help_command(ctx):
     embed.add_field(name="!modifanniv jj-mm", value="Modifie ta date d'anniversaire", inline=False)
     embed.add_field(name="!suppranniv", value="Supprime ton anniversaire enregistré", inline=False)
     embed.add_field(name="!annivs", value="Affiche la liste de tous les anniversaires (admin)", inline=False)
+    embed.add_field(name="!roles", value="Obtiens des rôles via réaction (dans 🛠·gestion-de-rôle)", inline=False)
     embed.add_field(name="Ping Bump auto", value="Le bot ping automatiquement pour bumper toutes les 2h si possible", inline=False)
     embed.add_field(name="Anniversaires 🎂", value=f"Le bot ping dans le salon d'anniversaire et attribue le rôle '{ANNIV_ROLE_NAME}' à ceux dont c'est l'anniversaire.", inline=False)
     await ctx.send(embed=embed)
 
-# === Gestion automatique des anniversaires & rôle ===
+# === Commande !roles pour envoi dans le bon salon ===
+@bot.command(name="roles")
+@commands.has_permissions(administrator=True)
+async def send_reaction_roles(ctx):
+    channel = bot.get_channel(GESTION_ROLE_CHANNEL_ID)
+    if not channel:
+        await ctx.send("❌ Salon de gestion des rôles introuvable.")
+        return
 
+    desc = "**Réagis avec l’émoji correspondant pour obtenir ou retirer un rôle :**\n\n"
+    for emoji, role_id in REACTION_ROLES.items():
+        role = ctx.guild.get_role(role_id)
+        role_name = role.name if role else f"ID {role_id}"
+        desc += f"> {emoji}  **→ {role_name}**\n\n"
+    embed = discord.Embed(
+        title="🌟 __Auto-attribution des rôles__",
+        description=desc,
+        color=discord.Color.brand_green()
+    )
+    embed.set_footer(text="Clique sur un émoji ci-dessous pour gérer tes rôles !")
+    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/747/747376.png")  # icône sympa, change si tu veux
+    msg = await channel.send(embed=embed)
+    for emoji in REACTION_ROLES:
+        await msg.add_reaction(emoji)
+    # Enregistre l'ID du message pour gestion future
+    with open("reaction_roles_msg.txt", "w") as f:
+        f.write(str(msg.id))
+    global REACTION_ROLE_MESSAGE_ID
+    REACTION_ROLE_MESSAGE_ID = msg.id
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.user_id == bot.user.id:
+        return
+    if payload.channel_id != GESTION_ROLE_CHANNEL_ID:
+        return
+    global REACTION_ROLE_MESSAGE_ID
+    if not REACTION_ROLE_MESSAGE_ID:
+        try:
+            with open("reaction_roles_msg.txt", "r") as f:
+                REACTION_ROLE_MESSAGE_ID = int(f.read().strip())
+        except:
+            return
+    if payload.message_id != REACTION_ROLE_MESSAGE_ID:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    member = guild.get_member(payload.user_id)
+    emoji = str(payload.emoji)
+    role_id = REACTION_ROLES.get(emoji)
+    if role_id:
+        role = guild.get_role(role_id)
+        if role and member:
+            await member.add_roles(role, reason="Ajout auto via réaction")
+            print(f"✅ Rôle {role.name} ajouté à {member.display_name}")
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    if payload.channel_id != GESTION_ROLE_CHANNEL_ID:
+        return
+    global REACTION_ROLE_MESSAGE_ID
+    if not REACTION_ROLE_MESSAGE_ID:
+        try:
+            with open("reaction_roles_msg.txt", "r") as f:
+                REACTION_ROLE_MESSAGE_ID = int(f.read().strip())
+        except:
+            return
+    if payload.message_id != REACTION_ROLE_MESSAGE_ID:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    member = guild.get_member(payload.user_id)
+    emoji = str(payload.emoji)
+    role_id = REACTION_ROLES.get(emoji)
+    if role_id:
+        role = guild.get_role(role_id)
+        if role and member:
+            await member.remove_roles(role, reason="Retrait auto via réaction")
+            print(f"❎ Rôle {role.name} retiré à {member.display_name}")
+
+# === Gestion automatique des anniversaires & rôle ===
 @tasks.loop(time=paris_tz.localize(datetime.combine(datetime.today(), datetime.strptime("10:00", "%H:%M").time())).timetz())
 async def birthday_task():
     now = datetime.now(paris_tz)
@@ -333,7 +426,13 @@ async def on_message(message):
 
 @bot.event
 async def on_ready():
-    print(f"✅ Connecté en tant que {bot.user})")
+    print(f"✅ Connecté en tant que {bot.user}")
+    global REACTION_ROLE_MESSAGE_ID
+    try:
+        with open("reaction_roles_msg.txt", "r") as f:
+            REACTION_ROLE_MESSAGE_ID = int(f.read().strip())
+    except:
+        REACTION_ROLE_MESSAGE_ID = None
     maintenance_task.start()
     birthday_task.start()
 
