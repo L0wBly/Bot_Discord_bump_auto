@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands, tasks
-import os
+import os, json
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 import pytz
@@ -9,23 +9,224 @@ import pytz
 load_dotenv()
 TOKEN        = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID   = 1374712467933888513  # ID du salon de bump
-ROLE_ID      = 1377230605309313085  # ID du rôle à ping
+ROLE_ID      = 1377230605309313085  # ID du rôle à ping pour le bump
 DISBOARD_ID  = 302050872383242240   # Disboard bot ID
+BIRTHDAY_CHANNEL_ID = 1377990979100999700  # Remplace par l'ID de ton salon anniversaire
 MESSAGE      = "C'est l'heure de bumper !!"
+BIRTHDAY_FILE = "birthdays.json"
+ANNIV_ROLE_NAME = "Anniversaire"
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 bot.remove_command("help")
 
 paris_tz = pytz.timezone("Europe/Paris")
 
-# Nettoyage automatique des anciens messages
+# ==== Affichage date "31-05" -> "31 mai" ====
+def format_date_jour_mois(date_str):
+    mois_fr = [
+        "janvier", "février", "mars", "avril", "mai", "juin",
+        "juillet", "août", "septembre", "octobre", "novembre", "décembre"
+    ]
+    try:
+        jour, mois = date_str.split("-")
+        mois_int = int(mois)
+        mois_nom = mois_fr[mois_int - 1]
+        return f"{int(jour)} {mois_nom}"
+    except:
+        return date_str
+
+# Chargement des anniversaires
+try:
+    with open(BIRTHDAY_FILE, "r", encoding="utf-8") as f:
+        birthdays = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    birthdays = {}
+
+def save_birthdays():
+    with open(BIRTHDAY_FILE, "w", encoding="utf-8") as f:
+        json.dump(birthdays, f, ensure_ascii=False, indent=2)
+
+# === Commandes ANNIVERSAIRE stylées ===
+
+@bot.command(name="anniv")
+async def set_birthday(ctx, date: str = None):
+    if not date:
+        embed = discord.Embed(
+            description="❓ Utilise la commande : `!anniv jj-mm` (exemple : `!anniv 14-06`)",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+        return
+    if str(ctx.author.id) in birthdays:
+        embed = discord.Embed(
+            description="🚫 Tu as déjà enregistré ton anniversaire. Utilise `!modifanniv jj-mm` pour le modifier.",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return
+    try:
+        datetime.strptime(date, "%d-%m")
+    except ValueError:
+        embed = discord.Embed(
+            description="❌ Format incorrect. Merci d'utiliser : `!anniv jj-mm` (exemple : `!anniv 14-06`)",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return
+    birthdays[str(ctx.author.id)] = date
+    save_birthdays()
+    embed = discord.Embed(
+        description=f"🎂 Ton anniversaire a été enregistré pour le **{format_date_jour_mois(date)}** !",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text=f"{ctx.author.display_name} 🎉")
+    await ctx.send(embed=embed)
+
+@bot.command(name="modifanniv")
+async def modify_birthday(ctx, date: str = None):
+    if not date:
+        embed = discord.Embed(
+            description="❓ Utilise la commande : `!modifanniv jj-mm` (exemple : `!modifanniv 14-06`)",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+        return
+    if str(ctx.author.id) not in birthdays:
+        embed = discord.Embed(
+            description="🔒 Tu n'as pas encore enregistré ton anniversaire. Utilise d'abord `!anniv jj-mm`.",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return
+    try:
+        datetime.strptime(date, "%d-%m")
+    except ValueError:
+        embed = discord.Embed(
+            description="❌ Format incorrect. Merci d'utiliser : `!modifanniv jj-mm` (exemple : `!modifanniv 14-06`)",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return
+    birthdays[str(ctx.author.id)] = date
+    save_birthdays()
+    embed = discord.Embed(
+        description=f"🎉 Ton anniversaire a bien été modifié ! Nouvelle date : **{format_date_jour_mois(date)}**",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text=f"{ctx.author.display_name}")
+    await ctx.send(embed=embed)
+
+@bot.command(name="suppranniv")
+async def delete_birthday(ctx):
+    if str(ctx.author.id) not in birthdays:
+        embed = discord.Embed(
+            description="🔒 Tu n'as pas encore enregistré ton anniversaire.",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+        return
+    del birthdays[str(ctx.author.id)]
+    save_birthdays()
+    embed = discord.Embed(
+        description="🗑️ Ton anniversaire a bien été supprimé !",
+        color=discord.Color.red()
+    )
+    await ctx.send(embed=embed)
+
+@bot.command(name="annivs")
+@commands.has_permissions(administrator=True)
+async def list_birthdays(ctx):
+    if not birthdays:
+        embed = discord.Embed(
+            title="Liste des anniversaires 🎂",
+            description="Aucun anniversaire enregistré.",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+        return
+    sorted_bd = sorted(birthdays.items(), key=lambda x: datetime.strptime(x[1], "%d-%m"))
+    embed = discord.Embed(
+        title="🎉 Liste des anniversaires enregistrés",
+        description="Voici tous les anniversaires du serveur, triés par date :",
+        color=discord.Color.purple()
+    )
+    for uid, date_str in sorted_bd:
+        member = ctx.guild.get_member(int(uid))
+        name = member.display_name if member else f"ID {uid}"
+        embed.add_field(
+            name=f"📅 {format_date_jour_mois(date_str)}",
+            value=f"👤 {name}",
+            inline=False
+        )
+    await ctx.send(embed=embed)
+
+# === Commande !help personnalisée ===
+
+@bot.command(name="help")
+async def help_command(ctx):
+    embed = discord.Embed(
+        title="📚 Commandes du bot",
+        description="Voici la liste des commandes disponibles :",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="!anniv jj-mm", value="Enregistre ta date d'anniversaire (ex : !anniv 14-06)", inline=False)
+    embed.add_field(name="!modifanniv jj-mm", value="Modifie ta date d'anniversaire", inline=False)
+    embed.add_field(name="!suppranniv", value="Supprime ton anniversaire enregistré", inline=False)
+    embed.add_field(name="!annivs", value="Affiche la liste de tous les anniversaires (admin)", inline=False)
+    embed.add_field(name="Ping Bump auto", value="Le bot ping automatiquement pour bumper toutes les 2h si possible", inline=False)
+    embed.add_field(name="Anniversaires 🎂", value=f"Le bot ping dans le salon d'anniversaire et attribue le rôle '{ANNIV_ROLE_NAME}' à ceux dont c'est l'anniversaire.", inline=False)
+    await ctx.send(embed=embed)
+
+# === Gestion automatique des anniversaires & rôle ===
+
+@tasks.loop(time=paris_tz.localize(datetime.combine(datetime.today(), datetime.strptime("10:00", "%H:%M").time())).timetz())
+async def birthday_task():
+    now = datetime.now(paris_tz)
+    today_str = now.strftime("%d-%m")
+    channel = bot.get_channel(BIRTHDAY_CHANNEL_ID)
+    guild = channel.guild if channel else None
+
+    if not channel or not guild:
+        print("❌ Salon anniversaire ou serveur introuvable pour les anniversaires")
+        return
+
+    role_anniv = discord.utils.get(guild.roles, name=ANNIV_ROLE_NAME)
+    if not role_anniv:
+        print(f"❌ Rôle {ANNIV_ROLE_NAME} non trouvé. Crée le rôle exact « {ANNIV_ROLE_NAME} » dans ton serveur !")
+        return
+
+    users_today = [uid for uid, date in birthdays.items() if date == today_str]
+    mentions = " ".join(f"<@{uid}>" for uid in users_today)
+    if users_today:
+        embed = discord.Embed(
+            title="🎂 Bon anniversaire !",
+            description=f"{mentions} Passe une super journée 🥳",
+            color=discord.Color.gold()
+        )
+        embed.set_image(url="https://media.giphy.com/media/3o6Zt8zb1aA9n4cCZa/giphy.gif")
+        await channel.send(embed=embed)
+        print(f"🎉 Anniversaires fêtés aujourd'hui : {users_today}")
+
+        for uid in users_today:
+            member = guild.get_member(int(uid))
+            if member and role_anniv not in member.roles:
+                await member.add_roles(role_anniv, reason="C'est son anniversaire !")
+                print(f"🎉 Rôle Anniversaire attribué à {member.display_name}")
+
+    # Retirer le rôle Anniversaire à ceux qui ne sont pas nés aujourd'hui
+    for member in guild.members:
+        if role_anniv in member.roles and (str(member.id) not in users_today):
+            await member.remove_roles(role_anniv, reason="Ce n'est plus son anniversaire")
+            print(f"🎈 Rôle Anniversaire retiré à {member.display_name}")
+
+# === Nettoyage automatique des anciens messages de ping bump et Disboard ===
 async def cleanup_channel(channel):
     messages = [m async for m in channel.history(limit=100)]
 
-    # 1. SUPPRESSION DES PINGS BOT (on garde le plus récent)
     bot_msgs = [m for m in messages if m.author.id == bot.user.id and "C'est l'heure de bumper" in m.content]
     bot_msgs_sorted = sorted(bot_msgs, key=lambda m: m.created_at, reverse=False)
     bot_to_delete = bot_msgs_sorted[:-1]
@@ -36,7 +237,6 @@ async def cleanup_channel(channel):
         except Exception as e:
             print(f"⚠️ Erreur suppression message ping : {e}")
 
-    # 2. SUPPRESSION DES ANCIENS DISBOARD (on garde le plus récent)
     disboard_msgs = []
     for m in messages:
         is_disboard = (m.author.id == DISBOARD_ID)
@@ -58,7 +258,6 @@ async def cleanup_channel(channel):
         except Exception as e:
             print(f"⚠️ Erreur suppression message disboard : {e}")
 
-# Pour garder l'heure du dernier ping bump
 last_ping_time = None
 
 @tasks.loop(minutes=5)
@@ -121,7 +320,6 @@ async def maintenance_task():
 
 @bot.event
 async def on_message(message):
-    # Nettoyage instantané si Disboard répond (optionnel mais ça "force" le nettoyage)
     if (
         message.author.id == DISBOARD_ID
         and message.embeds
@@ -136,6 +334,7 @@ async def on_message(message):
 @bot.event
 async def on_ready():
     print(f"✅ Connecté en tant que {bot.user})")
-    maintenance_task.start()  # Une seule tâche toutes les 5 min
+    maintenance_task.start()
+    birthday_task.start()
 
 bot.run(TOKEN)
