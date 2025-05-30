@@ -34,6 +34,9 @@ def save_bumps():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(bumps, f, ensure_ascii=False, indent=2)
 
+# Pour chaque salon, on stocke l'ID du dernier utilisateur à avoir fait /bump
+last_bumper = {}
+
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
@@ -101,15 +104,28 @@ async def bumps_leaderboard(ctx):
 async def cleanup_channel(channel):
     messages = [m async for m in channel.history(limit=500)]
 
-    # Garde SEULEMENT le dernier message Disboard
-    disboard_msgs = [m for m in messages if m.author.id == DISBOARD_ID and m.embeds]
+    # On repère les messages Disboard par ID ET si le message contient "Bump effectué !" dans le contenu ou l'embed
+    disboard_msgs = []
+    for m in messages:
+        is_disboard = (m.author.id == DISBOARD_ID)
+        has_bump = False
+        if m.embeds and m.embeds[0].description and "Bump effectué" in m.embeds[0].description:
+            has_bump = True
+        elif m.content and "Bump effectué" in m.content:
+            has_bump = True
+        # Parfois le titre uniquement
+        elif m.embeds and m.embeds[0].title and "DISBOARD : La liste des serveurs publics" in m.embeds[0].title:
+            has_bump = True
+        if is_disboard and has_bump:
+            disboard_msgs.append(m)
+    # Trie du plus ancien au plus récent
     disboard_msgs_sorted = sorted(disboard_msgs, key=lambda m: m.created_at, reverse=False)
-    disboard_to_delete = disboard_msgs_sorted[:-1]  # Tous sauf le plus récent
+    disboard_to_delete = disboard_msgs_sorted[:-1]  # On garde le plus récent
 
-    # Garde SEULEMENT le dernier message du bot
+    # Même logique pour ton bot
     bot_msgs = [m for m in messages if m.author.id == bot.user.id and MESSAGE in m.content]
     bot_msgs_sorted = sorted(bot_msgs, key=lambda m: m.created_at, reverse=False)
-    bot_to_delete = bot_msgs_sorted[:-1]  # Tous sauf le plus récent
+    bot_to_delete = bot_msgs_sorted[:-1]
 
     to_delete = disboard_to_delete + bot_to_delete
 
@@ -143,6 +159,7 @@ async def cleanup_channel(channel):
 
     print(f"🧹 Nettoyage : {deleted} anciens messages supprimés.")
 
+
 # Rappel automatique de bump (ping le rôle à la bonne heure)
 @tasks.loop(minutes=5)
 async def check_bump():
@@ -150,11 +167,14 @@ async def check_bump():
     ts = now_local.strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n{'='*40}\n  🕒 Heure Paris : {ts}\n{'='*40}\n")
 
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await cleanup_channel(channel)   # <- Nettoyage toutes les 5 min
+
     if now_local.hour < 11:
         print("⏸️ Pause matinale : pas de ping avant 11 h.")
         return
 
-    channel = bot.get_channel(CHANNEL_ID)
     if not channel:
         print(f"❌ Salon ({CHANNEL_ID}) introuvable.")
         return
@@ -181,7 +201,6 @@ async def check_bump():
             to_wait = timedelta(hours=2) - age
             mins, secs = divmod(to_wait.seconds, 60)
             print(f"✅ Dernier bump il y a {age}. Prochain rappel dans {mins} m {secs} s.")
-            await cleanup_channel(channel)
             return
 
     print(f"❗ Aucun bump récent (ou plus de 2h écoulées). Envoi d'un rappel ping !")
@@ -191,45 +210,41 @@ async def check_bump():
     except Exception as e:
         print(f"⚠️ Erreur envoi ping: {e}")
 
-    await cleanup_channel(channel)
 
-# Met à jour le compteur automatiquement quand Disboard félicite
 @bot.event
 async def on_message(message):
-    # Debug : affiche tous les messages reçus dans la console
-    print(f"\n=== Message reçu ===")
-    print(f"Auteur : {message.author} (ID {message.author.id})")
-    print(f"Contenu : {message.content}")
-    if message.embeds:
-        embed = message.embeds[0]
-        print(f"Embed title : {embed.title}")
-        print(f"Embed description : {embed.description}")
+    # Debug (optionnel)
+    print(f"Message reçu : {message.author} | {message.content}")
 
-    # Ignore les messages du bot lui-même
-    if message.author == bot.user:
-        return
+    # 1. Détection du /bump
+    if (
+        "# bump" in message.content
+        and "a utilisé" in message.content
+        and not message.author.bot
+    ):
+        last_bumper[message.channel.id] = message.author.id
+        print(f"Prépare bump pour {message.author} dans salon {message.channel.id}")
 
-    # Vérifie que c'est bien Disboard
-    if message.author.id == DISBOARD_ID and message.embeds:
-        embed = message.embeds[0]
-        # Adapte ici selon la structure réelle des messages Disboard sur ton serveur :
-        if (embed.title and ("Bump réussi" in embed.title or "Bump effectué" in embed.title)) \
-           or (embed.description and "Bravo" in embed.description):
-            # Cherche la mention du bumper dans la description
-            if message.mentions:
-                bumper = message.mentions[0]
-                user_id = str(bumper.id)
-                bumps[user_id] = bumps.get(user_id, 0) + 1
-                save_bumps()
-                print(f"✨ Compteur bump mis à jour pour {bumper} ({user_id}) : {bumps[user_id]}")
-                # Nettoie après un bump réussi
-                channel = message.channel
-                await cleanup_channel(channel)
-            else:
-                print("❓ Aucun utilisateur mentionné dans le bump réussi.")
+    # 2. Détection du message Disboard "Bump effectué !"
+    if (
+        message.author.id == DISBOARD_ID
+        and message.embeds
+        and (
+            (message.embeds[0].title and "DISBOARD" in message.embeds[0].title)
+            or (message.embeds[0].description and "Bump effectué" in message.embeds[0].description)
+        )
+    ):
+        bumper_id = last_bumper.get(message.channel.id)
+        if bumper_id:
+            bumps[str(bumper_id)] = bumps.get(str(bumper_id), 0) + 1
+            save_bumps()
+            print(f"Bump ajouté pour {bumper_id} dans salon {message.channel.id}")
+            last_bumper[message.channel.id] = None
         else:
-            print("➡️ Message Disboard mais pas de bump réussi détecté.")
-    # Permet d'utiliser aussi les autres commandes (important !)
+            print("Pas trouvé de bumper associé à ce bump Disboard.")
+
+        await cleanup_channel(message.channel)
+
     await bot.process_commands(message)
 
 @bot.event
