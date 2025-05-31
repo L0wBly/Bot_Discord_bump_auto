@@ -455,7 +455,7 @@ async def maintenance_task():
             except Exception as e:
                 print(f"⚠️ Erreur envoi ping: {e}")
         else:
-            to_wait = timedelta(minutes=30) - (now_utc - last_ping_time)
+            to_wait = timedelta(minutes=60) - (now_utc - last_ping_time)
             mins, secs = divmod(to_wait.seconds, 60)
             print(f"⌛ Ping déjà envoyé il y a moins de 30min. Prochain possible dans {mins} min {secs} sec.")
     else:
