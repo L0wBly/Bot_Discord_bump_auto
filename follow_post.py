@@ -1,7 +1,10 @@
+import os
+from dotenv import load_dotenv
+
 import discord
 from discord.ext import commands, tasks
-import os, json
-from dotenv import load_dotenv
+import aiohttp
+import json
 from datetime import datetime, timezone, timedelta
 import pytz
 
@@ -67,7 +70,7 @@ def save_birthdays():
     with open(BIRTHDAY_FILE, "w", encoding="utf-8") as f:
         json.dump(birthdays, f, ensure_ascii=False, indent=2)
 
-# === Commandes ANNIVERSAIRE stylées ===
+# === Commandes ANNIVERSAIRE ===
 @bot.command(name="anniv")
 async def set_birthday(ctx, date: str = None):
     if not date:
@@ -180,21 +183,68 @@ async def list_birthdays(ctx):
         )
     await ctx.send(embed=embed)
 
-# === Commande !help personnalisée ===
+# === Commande Anime/Manga (API Jikan) ===
+async def fetch_jikan(endpoint):
+    url = f"https://api.jikan.moe/v4/{endpoint}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
+            return await resp.json()
+
+@bot.command(help="Cherche des infos sur un anime. Utilisation : !anime <titre>")
+async def anime(ctx, *, titre: str):
+    data = await fetch_jikan(f"anime?q={titre}&limit=1")
+    if not data or not data.get("data"):
+        await ctx.send("Aucun anime trouvé.")
+        return
+    anime = data["data"][0]
+    embed = discord.Embed(
+        title=anime["title"],
+        url=anime["url"],
+        description=anime.get("synopsis", "Pas de synopsis disponible."),
+        color=discord.Color.blue()
+    )
+    embed.set_image(url=anime["images"]["jpg"]["image_url"])
+    embed.add_field(name="Score", value=anime.get("score", "N/A"))
+    embed.add_field(name="Episodes", value=anime.get("episodes", "N/A"))
+    embed.add_field(name="Statut", value=anime.get("status", "N/A"))
+    await ctx.send(embed=embed)
+
+@bot.command(help="Cherche des infos sur un manga. Utilisation : !manga <titre>")
+async def manga(ctx, *, titre: str):
+    data = await fetch_jikan(f"manga?q={titre}&limit=1")
+    if not data or not data.get("data"):
+        await ctx.send("Aucun manga trouvé.")
+        return
+    manga = data["data"][0]
+    embed = discord.Embed(
+        title=manga["title"],
+        url=manga["url"],
+        description=manga.get("synopsis", "Pas de synopsis disponible."),
+        color=discord.Color.green()
+    )
+    embed.set_image(url=manga["images"]["jpg"]["image_url"])
+    embed.add_field(name="Score", value=manga.get("score", "N/A"))
+    embed.add_field(name="Volumes", value=manga.get("volumes", "N/A"))
+    embed.add_field(name="Statut", value=manga.get("status", "N/A"))
+    await ctx.send(embed=embed)
+
+# === Commande !help regroupée ===
 @bot.command(name="help")
 async def help_command(ctx):
+    print(f"HELP appelé par {ctx.author} dans {ctx.guild}")
     embed = discord.Embed(
         title="📚 Commandes du bot",
         description="Voici la liste des commandes disponibles :",
         color=discord.Color.blurple()
     )
+    embed.add_field(name="!anime <titre>", value="Cherche des infos sur un anime. Utilisation : !anime <titre>", inline=False)
+    embed.add_field(name="!manga <titre>", value="Cherche des infos sur un manga. Utilisation : !manga <titre>", inline=False)
     embed.add_field(name="!anniv jj-mm", value="Enregistre ta date d'anniversaire (ex : !anniv 14-06)", inline=False)
     embed.add_field(name="!modifanniv jj-mm", value="Modifie ta date d'anniversaire", inline=False)
     embed.add_field(name="!suppranniv", value="Supprime ton anniversaire enregistré", inline=False)
     embed.add_field(name="!annivs", value="Affiche la liste de tous les anniversaires (admin)", inline=False)
-    embed.add_field(name="!roles", value="Obtiens des rôles via réaction (dans 🛠·gestion-de-rôle)", inline=False)
-    embed.add_field(name="Ping Bump auto", value="Le bot ping automatiquement pour bumper toutes les 2h si possible", inline=False)
-    embed.add_field(name="Anniversaires 🎂", value=f"Le bot ping dans le salon d'anniversaire et attribue le rôle '{ANNIV_ROLE_NAME}' à ceux dont c'est l'anniversaire.", inline=False)
     await ctx.send(embed=embed)
 
 # === Commande !roles pour envoi dans le bon salon ===
@@ -217,7 +267,7 @@ async def send_reaction_roles(ctx):
         color=discord.Color.brand_green()
     )
     embed.set_footer(text="Clique sur un émoji ci-dessous pour gérer tes rôles !")
-    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/747/747376.png")  # icône sympa, change si tu veux
+    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/747/747376.png")
     msg = await channel.send(embed=embed)
     for emoji in REACTION_ROLES:
         await msg.add_reaction(emoji)
