@@ -396,7 +396,7 @@ async def maintenance_task():
         bump_ok = True
 
     if bump_ok:
-        if not last_ping_time or (now_utc - last_ping_time) >= timedelta(minutes=30):
+        if not last_ping_time or (now_utc - last_ping_time) >= timedelta(minutes=60):
             try:
                 role = channel.guild.get_role(ROLE_ID)
                 await channel.send(f"<@&{ROLE_ID}> {MESSAGE}\nN’oubliez pas de faire `/bump` dans ce salon !")
