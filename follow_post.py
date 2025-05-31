@@ -239,12 +239,16 @@ async def help_command(ctx):
         description="Voici la liste des commandes disponibles :",
         color=discord.Color.blurple()
     )
+    embed.add_field(name="!messages", value="Te donne ton nombre de messages total", inline=False)
+    embed.add_field(name="!top", value="Te donne le classement du top10 parmi tout le serveur", inline=False)
+    embed.add_field(name="!rank", value="Te donne ton rang dans le serveur", inline=False)
     embed.add_field(name="!anime <titre>", value="Cherche des infos sur un anime. Utilisation : !anime <titre>", inline=False)
     embed.add_field(name="!manga <titre>", value="Cherche des infos sur un manga. Utilisation : !manga <titre>", inline=False)
     embed.add_field(name="!anniv jj-mm", value="Enregistre ta date d'anniversaire (ex : !anniv 14-06)", inline=False)
     embed.add_field(name="!modifanniv jj-mm", value="Modifie ta date d'anniversaire", inline=False)
     embed.add_field(name="!suppranniv", value="Supprime ton anniversaire enregistré", inline=False)
     embed.add_field(name="!annivs", value="Affiche la liste de tous les anniversaires (admin)", inline=False)
+    embed.add_field(name="!classement", value="Affiche le classement des gens les plus actif", inline=False)
     await ctx.send(embed=embed)
 
 # === Commande !roles pour envoi dans le bon salon ===
